@@ -5,7 +5,7 @@ FROM --platform=linux/amd64 ubuntu:22.04
 ARG OPENFHE_VERSION=main
 ARG OPENFHE_REF=main
 
-# Install system dependencies
+# Install system dependencies including ccache
 RUN apt-get update && apt-get install -y \
     build-essential \
     cmake \
@@ -14,7 +14,13 @@ RUN apt-get update && apt-get install -y \
     libomp-dev \
     gcc \
     g++ \
+    ccache \
     && rm -rf /var/lib/apt/lists/*
+
+# Configure ccache
+RUN ccache --max-size=2G
+ENV CC="ccache gcc"
+ENV CXX="ccache g++"
 
 # Build OpenFHE from source
 WORKDIR /tmp
