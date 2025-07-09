@@ -1,5 +1,7 @@
 # OpenFHE Buildbox
 
+[![CI](https://github.com/matiasinsaurralde/openfhe-buildbox/actions/workflows/docker.yml/badge.svg)](https://github.com/matiasinsaurralde/openfhe-buildbox/actions/workflows/docker.yml)
+
 A Docker base image containing pre-built OpenFHE libraries and development tools for creating language bindings and applications.
 
 ## Overview
