@@ -32,8 +32,7 @@ WORKDIR /app
 # Copy your source code
 COPY . .
 
-# Build your application with OpenFHE
-RUN go build -tags openfhe -o my-app .
+# Build your application with OpenFHE...
 ```
 
 ### Local Development
