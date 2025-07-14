@@ -2,10 +2,10 @@ name: Build and Publish Docker Image
 
 on:
   push:
-    branches: [ main ]
+    branches: [ '**' ]
     tags: [ 'v*' ]
   pull_request:
-    branches: [ main ]
+    branches: [ '**' ]
   release:
     types: [ created ]
 
@@ -19,6 +19,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+    strategy:
+      matrix:
+        platform: [linux/amd64, linux/arm64]
 
     steps:
     - name: Checkout repository
@@ -39,19 +42,34 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "ref=v$VERSION" >> $GITHUB_OUTPUT
         else
-          # For other branches, use branch name as version
+          # For other branches, use main branch for OpenFHE but keep branch name for version
           BRANCH=${GITHUB_REF#refs/heads/}
           echo "version=$BRANCH" >> $GITHUB_OUTPUT
-          echo "ref=$BRANCH" >> $GITHUB_OUTPUT
+          echo "ref=main" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Determine if should push to registry
+      id: should-push
+      run: |
+        if [[ "${{ github.ref }}" == "refs/heads/main" ]] || [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+          echo "push=true" >> $GITHUB_OUTPUT
+        else
+          echo "push=false" >> $GITHUB_OUTPUT
         fi
 
     - name: Log in to Container Registry
-      if: github.event_name != 'pull_request'
+      if: steps.should-push.outputs.push == 'true' && github.event_name != 'pull_request'
       uses: docker/login-action@v3
       with:
         registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Prepare platform suffix
+      id: platform
+      run: |
+        platform_suffix=$(echo "${{ matrix.platform }}" | sed 's/\//-/g')
+        echo "suffix=$platform_suffix" >> $GITHUB_OUTPUT
 
     - name: Extract metadata
       id: meta
@@ -59,11 +77,12 @@ jobs:
       with:
         images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
         tags: |
-          type=ref,event=branch
-          type=ref,event=pr
-          type=semver,pattern={{version}}
-          type=semver,pattern={{major}}.{{minor}}
-          type=sha,prefix={{branch}}-
+          type=ref,event=branch,suffix=-${{ steps.platform.outputs.suffix }}
+          type=ref,event=pr,suffix=-${{ steps.platform.outputs.suffix }}
+          type=semver,pattern={{version}},suffix=-${{ steps.platform.outputs.suffix }}
+          type=semver,pattern={{major}}.{{minor}},suffix=-${{ steps.platform.outputs.suffix }}
+          type=sha,prefix={{branch}}-,suffix=-${{ steps.platform.outputs.suffix }}
+          type=raw,value=latest-${{ steps.platform.outputs.suffix }},enable=${{ steps.should-push.outputs.push == 'true' }}
         labels: |
           org.opencontainers.image.title=OpenFHE Buildbox
           org.opencontainers.image.description=Docker base image with pre-built OpenFHE libraries
@@ -72,21 +91,102 @@ jobs:
           org.opencontainers.image.version={{version}}
           org.opencontainers.image.revision={{sha}}
           openfhe.version=${{ steps.openfhe-version.outputs.version }}
+          openfhe.platform=${{ matrix.platform }}
 
     - name: Build and push Docker image
+      if: steps.should-push.outputs.push == 'true' && github.event_name != 'pull_request'
       uses: docker/build-push-action@v5
       with:
         context: .
-        platforms: linux/amd64
-        push: ${{ github.event_name != 'pull_request' }}
+        platforms: ${{ matrix.platform }}
+        push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
-        cache-from: |
-          type=gha
-          type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
-        cache-to: |
-          type=gha,mode=max
-          type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
         build-args: |
           OPENFHE_VERSION=${{ steps.openfhe-version.outputs.version }}
-          OPENFHE_REF=${{ steps.openfhe-version.outputs.ref }} 
+          OPENFHE_REF=${{ steps.openfhe-version.outputs.ref }}
+
+    - name: Build Docker image (no push)
+      if: steps.should-push.outputs.push != 'true' || github.event_name == 'pull_request'
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: ${{ matrix.platform }}
+        push: false
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        build-args: |
+          OPENFHE_VERSION=${{ steps.openfhe-version.outputs.version }}
+          OPENFHE_REF=${{ steps.openfhe-version.outputs.ref }}
+
+  # Combine individual architecture images into a multi-arch manifest
+  manifest:
+    runs-on: ubuntu-latest
+    needs: build
+    if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      packages: write
+    
+    steps:
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Determine OpenFHE version
+      id: openfhe-version
+      run: |
+        if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+          echo "version=main" >> $GITHUB_OUTPUT
+          echo "ref=main" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+          # Extract version from tag (e.g., v1.0.0 -> 1.0.0)
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "ref=v$VERSION" >> $GITHUB_OUTPUT
+        else
+          # For other branches, use main branch for OpenFHE but keep branch name for version
+          BRANCH=${GITHUB_REF#refs/heads/}
+          echo "version=$BRANCH" >> $GITHUB_OUTPUT
+          echo "ref=main" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Create and push multi-arch manifest
+      run: |
+        # Create manifest list for main tags without platform suffix
+        if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+          # Create main tag
+          docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main \
+            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main-linux-amd64 \
+            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main-linux-arm64
+          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main
+          
+          # Create latest tag (same as main)
+          docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main-linux-amd64 \
+            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main-linux-arm64
+          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+        elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+          VERSION=${GITHUB_REF#refs/tags/v}
+          # Create version tag
+          docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION \
+            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION-linux-amd64 \
+            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION-linux-arm64
+          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION
+          
+          # Create latest tag (same as version)
+          docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION-linux-amd64 \
+            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION-linux-arm64
+          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          
+          # Also create major.minor manifest
+          MAJOR_MINOR=$(echo $VERSION | sed 's/\.[0-9]*$//')
+          docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$MAJOR_MINOR \
+            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$MAJOR_MINOR-linux-amd64 \
+            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$MAJOR_MINOR-linux-arm64
+          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$MAJOR_MINOR
+        fi 
