@@ -81,7 +81,6 @@ jobs:
           type=ref,event=pr,suffix=-${{ steps.platform.outputs.suffix }}
           type=semver,pattern={{version}},suffix=-${{ steps.platform.outputs.suffix }}
           type=semver,pattern={{major}}.{{minor}},suffix=-${{ steps.platform.outputs.suffix }}
-          type=sha,prefix={{branch}}-,suffix=-${{ steps.platform.outputs.suffix }}
           type=raw,value=latest-${{ steps.platform.outputs.suffix }},enable=${{ steps.should-push.outputs.push == 'true' }}
         labels: |
           org.opencontainers.image.title=OpenFHE Buildbox
