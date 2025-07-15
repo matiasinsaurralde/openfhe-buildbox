@@ -2,8 +2,8 @@
 FROM ubuntu:22.04
 
 # Build arguments for OpenFHE version
-ARG OPENFHE_VERSION=main
-ARG OPENFHE_REF=main
+ARG OPENFHE_VERSION=v1.3.1
+ARG OPENFHE_REF=v1.3.1
 
 # Install system dependencies including ccache
 RUN apt-get update && apt-get install -y \
