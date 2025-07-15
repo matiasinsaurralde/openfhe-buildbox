@@ -21,7 +21,8 @@ jobs:
       packages: write
     strategy:
       matrix:
-        platform: [linux/amd64, linux/arm64]
+        platform: [linux/amd64]
+        # platform: [linux/amd64, linux/arm64]  # ARM64 temporarily disabled due to segfaults
 
     steps:
     - name: Checkout repository
@@ -153,39 +154,34 @@ jobs:
           echo "ref=main" >> $GITHUB_OUTPUT
         fi
 
-    - name: Create and push multi-arch manifest
+    - name: Create and push single-arch manifest
       run: |
         # Create manifest list for main tags without platform suffix
         if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-          # Create main tag
+          # Create main tag (single arch for now)
           docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main \
-            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main-linux-amd64 \
-            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main-linux-arm64
+            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main-linux-amd64
           docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main
           
           # Create latest tag (same as main)
           docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
-            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main-linux-amd64 \
-            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main-linux-arm64
+            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main-linux-amd64
           docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
         elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
           VERSION=${GITHUB_REF#refs/tags/v}
-          # Create version tag
+          # Create version tag (single arch for now)
           docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION \
-            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION-linux-amd64 \
-            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION-linux-arm64
+            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION-linux-amd64
           docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION
           
           # Create latest tag (same as version)
           docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
-            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION-linux-amd64 \
-            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION-linux-arm64
+            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION-linux-amd64
           docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           
           # Also create major.minor manifest
           MAJOR_MINOR=$(echo $VERSION | sed 's/\.[0-9]*$//')
           docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$MAJOR_MINOR \
-            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$MAJOR_MINOR-linux-amd64 \
-            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$MAJOR_MINOR-linux-arm64
+            --amend ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$MAJOR_MINOR-linux-amd64
           docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$MAJOR_MINOR
         fi 
