@@ -38,16 +38,14 @@ RUN git clone https://github.com/openfheorg/openfhe-development.git \
     && echo "Git log (last 5 commits):" && git log --oneline -5 \
     && mkdir build && cd build \
     && echo "Running cmake..." \
-    && cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED=ON \
+    && emcmake cmake .. -DCMAKE_INSTALL_PREFIX=${PREFIX} \
     && echo "CMake configuration completed successfully" \
     && echo "Running make with $(nproc) jobs..." \
-    && make -j$(nproc) VERBOSE=1 \
+    && emmake make \
     && echo "Make completed successfully" \
     && echo "Running make install..." \
-    && make install \
+    && emmake make install VERBOSE=1 \
     && echo "Make install completed successfully" \
-    && echo "Running ldconfig..." \
-    && ldconfig \
     && cd /tmp \
     && rm -rf openfhe-development
 
